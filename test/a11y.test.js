@@ -37,7 +37,8 @@ test("index.html sem violações axe serious/critical (WCAG A e AA)", async () =
   const porta = server.address().port;
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+    const page = await context.newPage();
     await page.goto(`http://127.0.0.1:${porta}/index.html`);
     const resultado = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
