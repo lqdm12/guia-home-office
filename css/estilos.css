@@ -1,0 +1,56 @@
+/* ============================================================
+   Vejo por Você — Estilos
+   Web app mobile-first, tema escuro, alvos de toque grandes.
+   ============================================================ */
+
+/* ---------- Variáveis e tema ---------- */
+:root{
+  --bg:#0b0f1a; --fg:#ffffff; --muted:#a9b4c6;
+  --acao:#ffb020; --acao-fg:#0b0f1a;
+  --ok:#2ecc71; --perigo:#ff4d4d; --sec:#1b2233;
+}
+
+/* ---------- Reset e base ---------- */
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* ---------- Telas ---------- */
+.tela{display:none; min-height:100dvh; padding:24px; flex-direction:column}
+.tela.ativa{display:flex}
+
+/* ---------- Tipografia ---------- */
+h1{font-size:2rem; line-height:1.1; margin-bottom:8px}
+p.sub{color:var(--muted); font-size:1.15rem; margin-bottom:auto}
+
+/* ---------- Botões ---------- */
+.botoes{display:flex; flex-direction:column; gap:20px; margin-top:auto}
+button{
+  width:100%; min-height:96px; border:none; border-radius:20px;
+  font-size:1.6rem; font-weight:800; cursor:pointer; padding:20px;
+  display:flex; align-items:center; justify-content:center; gap:12px;
+}
+.btn-primario{background:var(--acao); color:var(--acao-fg)}
+.btn-secundario{background:var(--sec); color:var(--fg); min-height:72px; font-size:1.25rem}
+.btn-perigo{background:var(--perigo); color:#fff}
+
+/* ---------- Status ---------- */
+.status{font-size:1.5rem; font-weight:700; text-align:center; padding:24px; margin:auto 0; line-height:1.3}
+.status small{display:block; color:var(--muted); font-weight:500; font-size:1.05rem; margin-top:12px}
+
+/* ---------- Mídia ---------- */
+video{width:100%; border-radius:16px; background:#000; margin-bottom:16px}
+
+/* ---------- Utilitários ---------- */
+.oculto{display:none !important}
+.pulso{animation:pulso 1.4s infinite}
+@keyframes pulso{0%,100%{opacity:1}50%{opacity:.5}}
+.rodape{color:var(--muted); font-size:.85rem; text-align:center; margin-top:20px}
+
+/* ---------- Acessibilidade ---------- */
+button:focus-visible{outline:5px solid #fff; outline-offset:4px}
+.tela[tabindex="-1"]:focus{outline:none}
