@@ -1,0 +1,15 @@
+{
+  "name": "vejo-por-voce",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Assistência visual ao vivo para pessoas cegas. MVP sem backend.",
+  "scripts": {
+    "test": "node --test test/nucleo.test.js",
+    "test:a11y": "node --test test/a11y.test.js",
+    "test:all": "node --test test/"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "playwright": "^1.49.1"
+  }
+}
