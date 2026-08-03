@@ -54,3 +54,6 @@ video{width:100%; border-radius:16px; background:#000; margin-bottom:16px}
 /* ---------- Acessibilidade ---------- */
 button:focus-visible{outline:5px solid #fff; outline-offset:4px}
 .tela[tabindex="-1"]:focus{outline:none}
+@media (prefers-reduced-motion: reduce){
+  .pulso{animation:none}
+}
