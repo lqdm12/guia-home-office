@@ -35,6 +35,7 @@
   .status{font-size:1.5rem; font-weight:700; text-align:center; padding:24px; margin:auto 0; line-height:1.3}
   .status small{display:block; color:var(--muted); font-weight:500; font-size:1.05rem; margin-top:12px}
   video{width:100%; border-radius:16px; background:#000; margin-bottom:16px}
+  .tela[tabindex="-1"]:focus{outline:none}
   .oculto{display:none !important}
   .pulso{animation:pulso 1.4s infinite}
   @keyframes pulso{0%,100%{opacity:1}50%{opacity:.5}}
@@ -44,7 +45,7 @@
 <body>
 
 <!-- HOME -->
-<section id="home" class="tela ativa" aria-label="Tela inicial">
+<section id="home" class="tela ativa" aria-label="Tela inicial" tabindex="-1">
   <h1>Vejo por Você</h1>
   <p class="sub">Ajuda visual ao vivo, na hora que você precisar.</p>
   <div class="botoes">
@@ -59,8 +60,8 @@
 </section>
 
 <!-- USUÁRIO -->
-<section id="usuario" class="tela" aria-label="Chamada de ajuda">
-  <div id="statusUsuario" class="status" role="status" aria-live="assertive">Preparando a câmera...</div>
+<section id="usuario" class="tela" aria-label="Chamada de ajuda" tabindex="-1">
+  <div id="statusUsuario" class="status">Preparando a câmera...</div>
   <video id="videoLocal" autoplay muted playsinline class="oculto"></video>
   <audio id="audioRemotoUsuario" autoplay></audio>
   <div class="botoes">
@@ -69,12 +70,12 @@
 </section>
 
 <!-- VOLUNTÁRIO -->
-<section id="voluntario" class="tela" aria-label="Painel do voluntário">
-  <div id="statusVoluntario" class="status" role="status" aria-live="polite">Conectando ao plantão...</div>
+<section id="voluntario" class="tela" aria-label="Painel do voluntário" tabindex="-1">
+  <div id="statusVoluntario" class="status">Conectando ao plantão...</div>
   <video id="videoRemoto" autoplay playsinline class="oculto"></video>
   <audio id="audioRemotoVol" autoplay class="oculto"></audio>
   <div class="botoes">
-    <button id="btnMutar" class="btn-secundario oculto" aria-label="Mutar meu microfone">Mutar microfone</button>
+    <button id="btnMutar" class="btn-secundario oculto" aria-label="Mutar meu microfone" aria-pressed="false">Mutar microfone</button>
     <button id="btnEncerrarVoluntario" class="btn-perigo oculto" aria-label="Encerrar chamada">Encerrar chamada</button>
     <button id="btnSairPlantao" class="btn-secundario" aria-label="Sair do plantão e voltar ao início">Sair do plantão</button>
   </div>
@@ -102,6 +103,7 @@ const $ = id => document.getElementById(id);
 function mostrarTela(id){
   document.querySelectorAll(".tela").forEach(t=>t.classList.remove("ativa"));
   $(id).classList.add("ativa");
+  $(id).focus({preventScroll:true});
 }
 let ultimaFala = "";
 function falar(txt){
@@ -117,7 +119,7 @@ function falar(txt){
 function vibrar(p){ if(navigator.vibrate) try{ navigator.vibrate(p); }catch(e){} }
 function status(elId, txt, sub){
   $(elId).innerHTML = txt + (sub ? `<small>${sub}</small>` : "");
-  falar(txt);
+  falar(sub ? `${txt} ${sub}` : txt);
 }
 function criarPeer(id){ return id ? new Peer(id, {config:STUN}) : new Peer({config:STUN}); }
 
@@ -125,13 +127,13 @@ function criarPeer(id){ return id ? new Peer(id, {config:STUN}) : new Peer({conf
    FLUXO USUÁRIO (pessoa cega pede ajuda)
    Chama todos os slots em paralelo, primeiro a atender vence.
 ============================================================ */
-let peerU=null, streamU=null, chamadaU=null, timerEspera=null, venceu=false;
+let peerU=null, streamU=null, chamadaU=null, timerEspera=null, venceu=false, caiu=false;
 
 $("btnUsuario").addEventListener("click", iniciarUsuario);
 
 async function iniciarUsuario(){
   mostrarTela("usuario");
-  venceu=false;
+  venceu=false; caiu=false;
   status("statusUsuario","Preparando a câmera...");
   $("statusUsuario").classList.add("pulso");
 
@@ -148,8 +150,14 @@ async function iniciarUsuario(){
 
   peerU = criarPeer();
   peerU.on("open", chamarSlots);
-  // slots vazios geram peer-unavailable; não é fatal, deixamos o timeout resolver
-  peerU.on("error", ()=>{});
+  peerU.on("error", err=>{
+    if(err && err.type === "peer-unavailable") return; // slot vazio, normal
+    if(venceu){ encerrarUsuario(true, "A conexão caiu."); return; }
+    falharUsuario("Erro de conexão.","Verifique sua internet e tente de novo.");
+  });
+  timerEspera = setTimeout(()=>{
+    if(!venceu) falharUsuario("Nenhum voluntário disponível agora.","Tente novamente em alguns minutos.");
+  }, TEMPO_ESPERA);
 }
 
 function chamarSlots(){
@@ -167,11 +175,9 @@ function chamarSlots(){
       status("statusUsuario","Conectado!","Mostre com a câmera o que você precisa. O voluntário está te ouvindo.");
       vibrar([120,60,120]);
     });
-    c.on("close", ()=>{ if(venceu && c===chamadaU) encerrarUsuario(true); });
+    c.on("error", ()=>{ if(venceu && c===chamadaU) caiu = true; });
+    c.on("close", ()=>{ if(venceu && c===chamadaU) encerrarUsuario(true, caiu ? "A conexão caiu." : "O voluntário encerrou."); });
   });
-  timerEspera = setTimeout(()=>{
-    if(!venceu) falharUsuario("Nenhum voluntário disponível agora.","Tente novamente em alguns minutos.");
-  }, TEMPO_ESPERA);
 }
 
 function falharUsuario(t, sub){
@@ -184,27 +190,36 @@ function falharUsuario(t, sub){
 
 $("btnEncerrarUsuario").addEventListener("click", ()=> encerrarUsuario(false));
 
-function encerrarUsuario(remoto){
+function encerrarUsuario(remoto, msg){
   $("statusUsuario").classList.remove("pulso");
-  status("statusUsuario", remoto ? "O voluntário encerrou." : "Chamada encerrada.");
+  status("statusUsuario", msg || (remoto ? "O voluntário encerrou." : "Chamada encerrada."));
   limparUsuario();
   setTimeout(()=> mostrarTela("home"), 1500);
 }
 
 function limparUsuario(){
   clearTimeout(timerEspera);
-  try{ chamadaU && chamadaU.close(); }catch(e){}
+  const c = chamadaU; chamadaU = null;
+  if(c) try{ c.close(); }catch(e){}
   try{ peerU && peerU.destroy(); }catch(e){}
   if(streamU) streamU.getTracks().forEach(t=>t.stop());
-  chamadaU=peerU=streamU=null; venceu=false;
+  peerU = streamU = null; venceu = false; caiu = false;
 }
 
 /* ============================================================
    FLUXO VOLUNTÁRIO (ocupa o primeiro slot livre e atende)
 ============================================================ */
-let peerV=null, streamV=null, chamadaV=null, ocupado=false, meuSlot=0;
+let peerV=null, streamV=null, chamadaV=null, ocupado=false, meuSlot=0, timerPlantao=null, caiuVol=false;
 
 $("btnVoluntario").addEventListener("click", entrarPlantao);
+
+function vigiarPlantao(){
+  clearTimeout(timerPlantao);
+  timerPlantao = setTimeout(()=>{
+    if(!peerV && !ocupado)
+      status("statusVoluntario","Erro ao conectar ao plantão.","Verifique sua internet e tente de novo.");
+  }, TEMPO_ESPERA);
+}
 
 async function entrarPlantao(){
   mostrarTela("voluntario");
@@ -214,17 +229,20 @@ async function entrarPlantao(){
   }catch(e){
     return status("statusVoluntario","Preciso do microfone para atender.","Libere a permissão e tente de novo.");
   }
+  vigiarPlantao();
   ocuparSlot(0);
 }
 
 function ocuparSlot(i){
   if(i >= SLOTS.length){
+    clearTimeout(timerPlantao);
     status("statusVoluntario","Todos os plantões estão ocupados agora.","Tente novamente em alguns minutos.");
     $("btnSairPlantao").classList.remove("oculto");
     return;
   }
   const p = criarPeer(SLOTS[i]);
   p.on("open", ()=>{
+    clearTimeout(timerPlantao);
     peerV = p; meuSlot = i+1;
     status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
     $("btnSairPlantao").classList.remove("oculto");
@@ -233,8 +251,15 @@ function ocuparSlot(i){
   p.on("error", err=>{
     if(err && err.type === "unavailable-id"){
       try{ p.destroy(); }catch(e){}
-      ocuparSlot(i+1); // posto ocupado, tenta o próximo
+      vigiarPlantao(); // posto ocupado, tenta o próximo
+      ocuparSlot(i+1);
+    }else if(ocupado && chamadaV){
+      clearTimeout(timerPlantao);
+      caiuVol = true;
+      fimChamadaVol("A conexão caiu.", false);
+      try{ p.destroy(); }catch(e){}
     }else{
+      clearTimeout(timerPlantao);
       status("statusVoluntario","Erro ao entrar de plantão.","Verifique sua internet.");
       $("btnSairPlantao").classList.remove("oculto");
     }
@@ -244,6 +269,7 @@ function ocuparSlot(i){
 function receberChamada(chamada){
   if(ocupado){ try{ chamada.close(); }catch(e){} return; } // já atendendo outra pessoa
   ocupado = true;
+  caiuVol = false;
   chamadaV = chamada;
   chamada.answer(streamV);
   status("statusVoluntario","Chamada recebida!","Descreva o que a pessoa está mostrando.");
@@ -256,15 +282,19 @@ function receberChamada(chamada){
     $("btnEncerrarVoluntario").classList.remove("oculto");
     $("btnSairPlantao").classList.add("oculto");
   });
-  chamada.on("close", ()=> fimChamadaVol("A pessoa encerrou."));
-  chamada.on("error", ()=> fimChamadaVol("A chamada caiu."));
+  chamada.on("close", ()=> fimChamadaVol(caiuVol ? "A conexão caiu." : "A pessoa encerrou."));
+  chamada.on("error", ()=> fimChamadaVol(caiuVol ? "A conexão caiu." : "A chamada caiu."));
 }
 
 $("btnMutar").addEventListener("click", ()=>{
   if(!streamV) return;
   const t = streamV.getAudioTracks()[0];
   t.enabled = !t.enabled;
-  $("btnMutar").textContent = t.enabled ? "Mutar microfone" : "Ativar microfone";
+  const rotulo = t.enabled ? "Mutar microfone" : "Ativar microfone";
+  $("btnMutar").textContent = rotulo;
+  $("btnMutar").setAttribute("aria-label", rotulo);
+  $("btnMutar").setAttribute("aria-pressed", String(!t.enabled));
+  falar(t.enabled ? "Microfone ativado." : "Microfone mutado.");
 });
 
 $("btnEncerrarVoluntario").addEventListener("click", ()=>{
@@ -272,20 +302,22 @@ $("btnEncerrarVoluntario").addEventListener("click", ()=>{
   fimChamadaVol("Chamada encerrada.");
 });
 
-function fimChamadaVol(msg){
+function fimChamadaVol(msg, continua=true){
   ocupado = false; chamadaV=null;
   const v = $("videoRemoto"); v.classList.add("oculto"); v.srcObject=null;
+  $("audioRemotoVol").srcObject = null;
   $("btnMutar").classList.add("oculto");
   $("btnEncerrarVoluntario").classList.add("oculto");
   $("btnSairPlantao").classList.remove("oculto");
-  status("statusVoluntario", msg, "Você continua de plantão.");
+  status("statusVoluntario", msg, continua ? "Você continua de plantão." : "Toque em Sair do plantão e entre de novo.");
   setTimeout(()=>{
-    if(peerV && !peerV.destroyed)
+    if(continua && peerV && !peerV.destroyed)
       status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
   }, 1800);
 }
 
 $("btnSairPlantao").addEventListener("click", ()=>{
+  clearTimeout(timerPlantao);
   try{ chamadaV && chamadaV.close(); }catch(e){}
   try{ peerV && peerV.destroy(); }catch(e){}
   if(streamV) streamV.getTracks().forEach(t=>t.stop());
