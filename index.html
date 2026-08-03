@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Vejo por Você</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0f1a; --fg:#ffffff; --muted:#a9b4c6;
+    --acao:#ffb020; --acao-fg:#0b0f1a;
+    --ok:#2ecc71; --perigo:#ff4d4d; --sec:#1b2233;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .tela{display:none; min-height:100dvh; padding:24px; flex-direction:column}
+  .tela.ativa{display:flex}
+  h1{font-size:2rem; line-height:1.1; margin-bottom:8px}
+  p.sub{color:var(--muted); font-size:1.15rem; margin-bottom:auto}
+  .botoes{display:flex; flex-direction:column; gap:20px; margin-top:auto}
+  button{
+    width:100%; min-height:96px; border:none; border-radius:20px;
+    font-size:1.6rem; font-weight:800; cursor:pointer; padding:20px;
+    display:flex; align-items:center; justify-content:center; gap:12px;
+  }
+  button:focus-visible{outline:5px solid #fff; outline-offset:4px}
+  .btn-primario{background:var(--acao); color:var(--acao-fg)}
+  .btn-secundario{background:var(--sec); color:var(--fg); min-height:72px; font-size:1.25rem}
+  .btn-perigo{background:var(--perigo); color:#fff}
+  .status{font-size:1.5rem; font-weight:700; text-align:center; padding:24px; margin:auto 0; line-height:1.3}
+  .status small{display:block; color:var(--muted); font-weight:500; font-size:1.05rem; margin-top:12px}
+  video{width:100%; border-radius:16px; background:#000; margin-bottom:16px}
+  .oculto{display:none !important}
+  .pulso{animation:pulso 1.4s infinite}
+  @keyframes pulso{0%,100%{opacity:1}50%{opacity:.5}}
+  .rodape{color:var(--muted); font-size:.85rem; text-align:center; margin-top:20px}
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<section id="home" class="tela ativa" aria-label="Tela inicial">
+  <h1>Vejo por Você</h1>
+  <p class="sub">Ajuda visual ao vivo, na hora que você precisar.</p>
+  <div class="botoes">
+    <button id="btnUsuario" class="btn-primario" aria-label="Preciso de ajuda. Toque para chamar um voluntário por vídeo.">
+      Preciso de ajuda
+    </button>
+    <button id="btnVoluntario" class="btn-secundario" aria-label="Sou voluntário. Toque para entrar de plantão e atender chamadas.">
+      Sou voluntário
+    </button>
+  </div>
+  <p class="rodape">MVP de teste. Sem cadastro.</p>
+</section>
+
+<!-- USUÁRIO -->
+<section id="usuario" class="tela" aria-label="Chamada de ajuda">
+  <div id="statusUsuario" class="status" role="status" aria-live="assertive">Preparando a câmera...</div>
+  <video id="videoLocal" autoplay muted playsinline class="oculto"></video>
+  <audio id="audioRemotoUsuario" autoplay></audio>
+  <div class="botoes">
+    <button id="btnEncerrarUsuario" class="btn-perigo" aria-label="Encerrar chamada">Encerrar</button>
+  </div>
+</section>
+
+<!-- VOLUNTÁRIO -->
+<section id="voluntario" class="tela" aria-label="Painel do voluntário">
+  <div id="statusVoluntario" class="status" role="status" aria-live="polite">Conectando ao plantão...</div>
+  <video id="videoRemoto" autoplay playsinline class="oculto"></video>
+  <audio id="audioRemotoVol" autoplay class="oculto"></audio>
+  <div class="botoes">
+    <button id="btnMutar" class="btn-secundario oculto" aria-label="Mutar meu microfone">Mutar microfone</button>
+    <button id="btnEncerrarVoluntario" class="btn-perigo oculto" aria-label="Encerrar chamada">Encerrar chamada</button>
+    <button id="btnSairPlantao" class="btn-secundario" aria-label="Sair do plantão e voltar ao início">Sair do plantão</button>
+  </div>
+</section>
+
+<script>
+/* ============================================================
+   CONFIG
+   POOL: slots de plantão. Cada voluntário online ocupa um slot.
+   A pessoa que pede ajuda chama todos ao mesmo tempo e conecta
+   no primeiro que atender. Aumente NUM_SLOTS para mais voluntários.
+
+   TRANSPORTE: toda a conexão está isolada nas funções
+   criarPeer / chamarSlots / responderChamada. É AQUI que se troca
+   PeerJS por LiveKit em produção, sem tocar na UI.
+============================================================ */
+const PREFIXO = "vejo-por-voce-2026-08";
+const NUM_SLOTS = 5;
+const SLOTS = Array.from({length:NUM_SLOTS}, (_,i)=> `${PREFIXO}-slot-${i+1}`);
+const STUN = { iceServers:[{ urls:"stun:stun.l.google.com:19302" }] };
+const TEMPO_ESPERA = 20000; // ms até desistir se ninguém atender
+
+/* ---------- utilidades ---------- */
+const $ = id => document.getElementById(id);
+function mostrarTela(id){
+  document.querySelectorAll(".tela").forEach(t=>t.classList.remove("ativa"));
+  $(id).classList.add("ativa");
+}
+let ultimaFala = "";
+function falar(txt){
+  if(!("speechSynthesis" in window)) return;
+  if(txt === ultimaFala) return;
+  ultimaFala = txt;
+  try{
+    const u = new SpeechSynthesisUtterance(txt);
+    u.lang = "pt-BR"; u.rate = 1;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }catch(e){}
+}
+function vibrar(p){ if(navigator.vibrate) try{ navigator.vibrate(p); }catch(e){} }
+function status(elId, txt, sub){
+  $(elId).innerHTML = txt + (sub ? `<small>${sub}</small>` : "");
+  falar(txt);
+}
+function criarPeer(id){ return id ? new Peer(id, {config:STUN}) : new Peer({config:STUN}); }
+
+/* ============================================================
+   FLUXO USUÁRIO (pessoa cega pede ajuda)
+   Chama todos os slots em paralelo, primeiro a atender vence.
+============================================================ */
+let peerU=null, streamU=null, chamadaU=null, timerEspera=null, venceu=false;
+
+$("btnUsuario").addEventListener("click", iniciarUsuario);
+
+async function iniciarUsuario(){
+  mostrarTela("usuario");
+  venceu=false;
+  status("statusUsuario","Preparando a câmera...");
+  $("statusUsuario").classList.add("pulso");
+
+  try{
+    streamU = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ ideal:"environment" } }, audio:true
+    });
+  }catch(e){
+    $("statusUsuario").classList.remove("pulso");
+    return status("statusUsuario","Não consegui acessar a câmera.","Verifique a permissão e tente de novo.");
+  }
+  $("videoLocal").srcObject = streamU;
+  status("statusUsuario","Procurando um voluntário...","Aguarde um instante.");
+
+  peerU = criarPeer();
+  peerU.on("open", chamarSlots);
+  // slots vazios geram peer-unavailable; não é fatal, deixamos o timeout resolver
+  peerU.on("error", ()=>{});
+}
+
+function chamarSlots(){
+  const chamadas = SLOTS.map(slot => peerU.call(slot, streamU));
+  chamadas.forEach(c=>{
+    if(!c) return;
+    c.on("stream", remoto=>{
+      if(venceu){ try{ c.close(); }catch(e){} return; }
+      venceu = true;
+      clearTimeout(timerEspera);
+      chamadaU = c;
+      chamadas.forEach(o=>{ if(o && o!==c) try{ o.close(); }catch(e){} });
+      $("audioRemotoUsuario").srcObject = remoto;
+      $("statusUsuario").classList.remove("pulso");
+      status("statusUsuario","Conectado!","Mostre com a câmera o que você precisa. O voluntário está te ouvindo.");
+      vibrar([120,60,120]);
+    });
+    c.on("close", ()=>{ if(venceu && c===chamadaU) encerrarUsuario(true); });
+  });
+  timerEspera = setTimeout(()=>{
+    if(!venceu) falharUsuario("Nenhum voluntário disponível agora.","Tente novamente em alguns minutos.");
+  }, TEMPO_ESPERA);
+}
+
+function falharUsuario(t, sub){
+  clearTimeout(timerEspera);
+  $("statusUsuario").classList.remove("pulso");
+  status("statusUsuario", t, sub);
+  vibrar(300);
+  limparUsuario();
+}
+
+$("btnEncerrarUsuario").addEventListener("click", ()=> encerrarUsuario(false));
+
+function encerrarUsuario(remoto){
+  $("statusUsuario").classList.remove("pulso");
+  status("statusUsuario", remoto ? "O voluntário encerrou." : "Chamada encerrada.");
+  limparUsuario();
+  setTimeout(()=> mostrarTela("home"), 1500);
+}
+
+function limparUsuario(){
+  clearTimeout(timerEspera);
+  try{ chamadaU && chamadaU.close(); }catch(e){}
+  try{ peerU && peerU.destroy(); }catch(e){}
+  if(streamU) streamU.getTracks().forEach(t=>t.stop());
+  chamadaU=peerU=streamU=null; venceu=false;
+}
+
+/* ============================================================
+   FLUXO VOLUNTÁRIO (ocupa o primeiro slot livre e atende)
+============================================================ */
+let peerV=null, streamV=null, chamadaV=null, ocupado=false, meuSlot=0;
+
+$("btnVoluntario").addEventListener("click", entrarPlantao);
+
+async function entrarPlantao(){
+  mostrarTela("voluntario");
+  status("statusVoluntario","Conectando ao plantão...");
+  try{
+    streamV = await navigator.mediaDevices.getUserMedia({ audio:true, video:false });
+  }catch(e){
+    return status("statusVoluntario","Preciso do microfone para atender.","Libere a permissão e tente de novo.");
+  }
+  ocuparSlot(0);
+}
+
+function ocuparSlot(i){
+  if(i >= SLOTS.length){
+    status("statusVoluntario","Todos os plantões estão ocupados agora.","Tente novamente em alguns minutos.");
+    $("btnSairPlantao").classList.remove("oculto");
+    return;
+  }
+  const p = criarPeer(SLOTS[i]);
+  p.on("open", ()=>{
+    peerV = p; meuSlot = i+1;
+    status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
+    $("btnSairPlantao").classList.remove("oculto");
+    p.on("call", receberChamada);
+  });
+  p.on("error", err=>{
+    if(err && err.type === "unavailable-id"){
+      try{ p.destroy(); }catch(e){}
+      ocuparSlot(i+1); // posto ocupado, tenta o próximo
+    }else{
+      status("statusVoluntario","Erro ao entrar de plantão.","Verifique sua internet.");
+      $("btnSairPlantao").classList.remove("oculto");
+    }
+  });
+}
+
+function receberChamada(chamada){
+  if(ocupado){ try{ chamada.close(); }catch(e){} return; } // já atendendo outra pessoa
+  ocupado = true;
+  chamadaV = chamada;
+  chamada.answer(streamV);
+  status("statusVoluntario","Chamada recebida!","Descreva o que a pessoa está mostrando.");
+  vibrar([120,60,120]);
+  chamada.on("stream", remoto=>{
+    const v = $("videoRemoto");
+    v.srcObject = remoto; v.classList.remove("oculto");
+    $("audioRemotoVol").srcObject = remoto;
+    $("btnMutar").classList.remove("oculto");
+    $("btnEncerrarVoluntario").classList.remove("oculto");
+    $("btnSairPlantao").classList.add("oculto");
+  });
+  chamada.on("close", ()=> fimChamadaVol("A pessoa encerrou."));
+  chamada.on("error", ()=> fimChamadaVol("A chamada caiu."));
+}
+
+$("btnMutar").addEventListener("click", ()=>{
+  if(!streamV) return;
+  const t = streamV.getAudioTracks()[0];
+  t.enabled = !t.enabled;
+  $("btnMutar").textContent = t.enabled ? "Mutar microfone" : "Ativar microfone";
+});
+
+$("btnEncerrarVoluntario").addEventListener("click", ()=>{
+  try{ chamadaV && chamadaV.close(); }catch(e){}
+  fimChamadaVol("Chamada encerrada.");
+});
+
+function fimChamadaVol(msg){
+  ocupado = false; chamadaV=null;
+  const v = $("videoRemoto"); v.classList.add("oculto"); v.srcObject=null;
+  $("btnMutar").classList.add("oculto");
+  $("btnEncerrarVoluntario").classList.add("oculto");
+  $("btnSairPlantao").classList.remove("oculto");
+  status("statusVoluntario", msg, "Você continua de plantão.");
+  setTimeout(()=>{
+    if(peerV && !peerV.destroyed)
+      status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
+  }, 1800);
+}
+
+$("btnSairPlantao").addEventListener("click", ()=>{
+  try{ chamadaV && chamadaV.close(); }catch(e){}
+  try{ peerV && peerV.destroy(); }catch(e){}
+  if(streamV) streamV.getTracks().forEach(t=>t.stop());
+  chamadaV=peerV=streamV=null; ocupado=false;
+  mostrarTela("home");
+});
+</script>
+</body>
+</html>
