@@ -80,7 +80,7 @@ const UA = ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-strea
 async function montarCena(sigPorta, appPorta) {
   const sig = peerServerHTTP(sigPorta);
   const app = servidorEstatico(appPorta);
-  await new Promise(r => app.listen(appPorta, "127.0.0.1", r));
+  await app.listen(appPorta);
   const browser = await chromium.launch({ args: UA });
   const ctx = await browser.newContext({ permissions: ["camera", "microphone"] });
   const configInj = `window.__VEJO_CONFIG__ = { peerServer: { host: "127.0.0.1", port: ${sigPorta}, path: "/" } };`;
@@ -94,7 +94,7 @@ async function montarCena(sigPorta, appPorta) {
     sig, app, browser, ctx, pV, pU,
     limpar: async () => {
       await browser.close();
-      await new Promise(r => app.close(r));
+      await app.close();
       await sig.close();
     }
   };
