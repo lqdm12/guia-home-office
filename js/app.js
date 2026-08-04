@@ -262,3 +262,12 @@ $("btnSairPlantao").addEventListener("click", ()=>{
   chamadaV=peerV=streamV=null; ocupado=false;
   mostrarTela("home");
 });
+
+/* ============================================================
+   DEPURAÇÃO (testes). Expõe o estado interno para o Playwright.
+   Não usado em produção.
+============================================================ */
+window.__VEJO_DEBUG__ = {
+  get usuario(){ return { peer: peerU, chamada: chamadaU, stream: streamU, caiu: caiu }; },
+  get voluntario(){ return { peer: peerV, chamada: chamadaV, stream: streamV, ocupado: ocupado }; }
+};
