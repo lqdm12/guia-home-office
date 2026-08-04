@@ -32,7 +32,7 @@ const ROOT = path.join(__dirname, "..");
 const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
 
 function servidorEstatico(porta) {
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     let p = decodeURIComponent(req.url.split("?")[0]);
     if (p === "/") p = "/index.html";
     const arquivo = path.join(ROOT, p);
@@ -42,6 +42,16 @@ function servidorEstatico(porta) {
     res.writeHead(200, { "Content-Type": MIME[path.extname(arquivo)] || "application/octet-stream" });
     fs.createReadStream(arquivo).pipe(res);
   });
+  const sockets = new Set();
+  server.on("connection", s => { sockets.add(s); s.on("close", () => sockets.delete(s)); });
+  return {
+    server,
+    listen: porta => new Promise(r => server.listen(porta, "127.0.0.1", r)),
+    close: () => new Promise(r => {
+      server.close(() => r());
+      for (const s of sockets) s.destroy();
+    })
+  };
 }
 
 function peerServerHTTP(porta) {
