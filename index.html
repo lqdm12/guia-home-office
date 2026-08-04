@@ -26,7 +26,7 @@
 
 <!-- USUÁRIO -->
 <section id="usuario" class="tela" aria-label="Chamada de ajuda" tabindex="-1">
-  <div id="statusUsuario" class="status">Preparando a câmera...</div>
+  <div id="statusUsuario" class="status" aria-live="assertive">Preparando a câmera...</div>
   <video id="videoLocal" autoplay muted playsinline class="oculto"></video>
   <audio id="audioRemotoUsuario" autoplay></audio>
   <div class="botoes">
@@ -36,7 +36,7 @@
 
 <!-- VOLUNTÁRIO -->
 <section id="voluntario" class="tela" aria-label="Painel do voluntário" tabindex="-1">
-  <div id="statusVoluntario" class="status">Conectando ao plantão...</div>
+  <div id="statusVoluntario" class="status" aria-live="assertive">Conectando ao plantão...</div>
   <video id="videoRemoto" autoplay playsinline muted class="oculto"></video>
   <audio id="audioRemotoVol" autoplay class="oculto"></audio>
   <div class="botoes">

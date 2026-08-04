@@ -13,6 +13,7 @@ const NUM_SLOTS = 5;
 const SLOTS = Nucleo.construirSlots(PREFIXO, NUM_SLOTS);
 const STUN = { iceServers:[{ urls:"stun:stun.l.google.com:19302" }] };
 const TEMPO_ESPERA = 20000; // ms até desistir se ninguém atender
+const TEMPO_RECUPERACAO = 8000; // ms tentando recuperar antes de encerrar e re-chamar
 
 /* ============================================================
    UTILIDADES
@@ -56,6 +57,109 @@ function opcoesPeer(){
 function criarPeer(id){ return id ? new Peer(id, opcoesPeer()) : new Peer(opcoesPeer()); }
 
 /* ============================================================
+   RECUPERAÇÃO DE CONEXÃO (troca de rede no meio da chamada)
+   Fonte de verdade: eventos da RTCPeerConnection, acessada por dentro
+   do MediaConnection do PeerJS (propriedade peerConnection). NÃO usamos
+   navigator.connection (não existe no iOS Safari).
+
+   Limite honesto do PeerJS 1.5.4: ele não expõe ICE restart de forma
+   limpa. Internamente, oniceconnectionstatechange só loga "disconnected"
+   e fecha a conexão em "failed" (sem renegotiation). A chamada best-effort
+   a pc.restartIce() abaixo só funciona se o stack renegociar (negotiationneeded),
+   o que o PeerJS não dispara de forma confiável para mídia. Por isso a
+   recuperação REAL depende do fallback: encerrar limpo e re-chamar.
+============================================================ */
+let recuperando = false;
+let timerRecuperacao = null;
+
+// Vigia a RTCPeerConnection de uma chamada ativa e anuncia cada estado em PT-BR.
+// perfil: "usuario" | "voluntario"
+function vigiarConexao(chamada, perfil){
+  const pc = chamada && chamada.peerConnection;
+  if(!pc) return;
+  let instavel = false;
+  const elId = perfil === "usuario" ? "statusUsuario" : "statusVoluntario";
+
+  function aoEstado(estado){
+    if(estado === "connected"){
+      if(instavel){
+        instavel = false;
+        clearTimeout(timerRecuperacao);
+        recuperando = false;
+        falar("Conectado de novo.");
+      }
+      return;
+    }
+    if(estado === "disconnected" || estado === "failed"){
+      if(instavel) return; // já anunciado, deixando o timer decidir o fallback
+      instavel = true;
+      status(elId, Nucleo.mensagemEstadoConexao(estado).texto, Nucleo.mensagemEstadoConexao(estado).fala);
+      tentarRecuperar(chamada, perfil);
+    }
+  }
+
+  // Substitui o handler interno do PeerJS: em "failed" o PeerJS fecharia a
+  // chamada sem chance de recuperação. Aqui o fallback é decidido por nós.
+  try{ pc.oniceconnectionstatechange = () => aoEstado(pc.iceConnectionState); }catch(e){}
+  try{ pc.onconnectionstatechange = () => aoEstado(pc.connectionState); }catch(e){}
+}
+
+function tentarRecuperar(chamada, perfil){
+  if(recuperando) return;
+  recuperando = true;
+  const peer = perfil === "usuario" ? peerU : peerV;
+  if(peer && peer.disconnected && !peer.destroyed){
+    try{ peer.reconnect(); }catch(e){} // reconecta a sinalização (PeerJS)
+  }
+  const pc = chamada && chamada.peerConnection;
+  if(pc && typeof pc.restartIce === "function" && pc.connectionState !== "closed"){
+    try{ pc.restartIce(); }catch(e){} // best-effort; ver comentário no cabeçalho
+  }
+  clearTimeout(timerRecuperacao);
+  timerRecuperacao = setTimeout(()=> desistirRecuperacao(perfil), TEMPO_RECUPERACAO);
+}
+
+function desistirRecuperacao(perfil){
+  clearTimeout(timerRecuperacao);
+  recuperando = false;
+  if(perfil === "usuario"){
+    const pc = chamadaU && chamadaU.peerConnection;
+    const vivo = pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed" || pc.connectionState === "connected");
+    if(vivo){
+      // Só a sinalização caiu, a mídia segue de pé: mantém a chamada e re-tenta.
+      timerRecuperacao = setTimeout(()=> desistirRecuperacao(perfil), TEMPO_RECUPERACAO);
+      return;
+    }
+    if(venceu) rechamar();
+    else limparUsuario();
+  }else{
+    if(!ocupado) return; // o evento "close" já finalizou
+    const pc = chamadaV && chamadaV.peerConnection;
+    const vivo = pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed" || pc.connectionState === "connected");
+    if(vivo && peerV && !peerV.destroyed){
+      timerRecuperacao = setTimeout(()=> desistirRecuperacao(perfil), TEMPO_RECUPERACAO);
+      return;
+    }
+    encerrarChamadaVolCaiu();
+  }
+}
+
+// Re-chama o plantão automaticamente, sempre falando. Nunca silêncio.
+let rechamada = false;
+function rechamar(){
+  if(rechamada) return;
+  rechamada = true;
+  const c = chamadaU; chamadaU = null;
+  if(c) try{ c.close(); }catch(e){}
+  try{ if(peerU) peerU.destroy(); }catch(e){}
+  chamadasU = [];
+  venceu = false; caiu = false; recuperando = false;
+  clearTimeout(timerRecuperacao);
+  status("statusUsuario","A chamada caiu, chamando de novo.","Aguarde um instante.");
+  montarPeerUsuario();
+}
+
+/* ============================================================
    FLUXO USUÁRIO (pessoa cega pede ajuda)
    Chama todos os slots em paralelo, primeiro a atender vence.
 ============================================================ */
@@ -65,7 +169,7 @@ $("btnUsuario").addEventListener("click", iniciarUsuario);
 
 async function iniciarUsuario(){
   mostrarTela("usuario");
-  venceu=false; caiu=false;
+  venceu=false; caiu=false; rechamada=false; recuperando=false;
   status("statusUsuario","Preparando a câmera...");
   $("statusUsuario").classList.add("pulso");
 
@@ -80,13 +184,41 @@ async function iniciarUsuario(){
   $("videoLocal").srcObject = streamU;
   status("statusUsuario","Procurando um voluntário...","Aguarde um instante.");
 
+  montarPeerUsuario();
+}
+
+function montarPeerUsuario(){
   peerU = criarPeer();
-  peerU.on("open", chamarSlots);
+  peerU.on("open", ()=>{
+    if(recuperando && chamadaU && chamadaU.peerConnection){
+      const pc = chamadaU.peerConnection;
+      const vivo = pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed" || pc.connectionState === "connected");
+      if(vivo){
+        // Sinalização voltou e a mídia continua viva: anuncia a recuperação.
+        clearTimeout(timerRecuperacao);
+        recuperando = false;
+        status("statusUsuario", "Conectado de novo.");
+      }
+    }
+    chamarSlots();
+  });
+  peerU.on("disconnected", ()=>{
+    if(peerU && peerU.disconnected && !peerU.destroyed){
+      try{ peerU.reconnect(); }catch(e){} // sinalização caiu na troca de rede
+    }
+  });
   peerU.on("error", err=>{
     if(err && err.type === "peer-unavailable") return; // slot vazio, normal
+    if(err && err.type === "network" && venceu){
+      // Sinalização caiu no meio da chamada: anuncia e tenta recuperar.
+      status("statusUsuario", Nucleo.mensagemEstadoConexao("disconnected").texto, Nucleo.mensagemEstadoConexao("disconnected").fala);
+      tentarRecuperar(chamadaU, "usuario");
+      return;
+    }
     if(venceu){ encerrarUsuario(true, true); return; }
     falharUsuario("Erro de conexão.","Verifique sua internet e tente de novo.");
   });
+  clearTimeout(timerEspera);
   timerEspera = setTimeout(()=>{
     if(!venceu){
       const m = Nucleo.mensagemTimeOut(chamadasU.some(c=>c && c.open));
@@ -96,6 +228,7 @@ async function iniciarUsuario(){
 }
 
 function chamarSlots(){
+  if(venceu) return; // reconexão de sinalização re-emite "open": não duplica chamadas
   const chamadas = SLOTS.map(slot => peerU.call(slot, streamU));
   chamadasU = chamadas;
   chamadas.forEach(c=>{
@@ -103,9 +236,11 @@ function chamarSlots(){
     c.on("stream", remoto=>{
       if(venceu){ try{ c.close(); }catch(e){} return; }
       venceu = true;
+      rechamada = false; recuperando = false;
       clearTimeout(timerEspera);
       chamadaU = c;
       chamadas.forEach(o=>{ if(o && o!==c) try{ o.close(); }catch(e){} });
+      vigiarConexao(c, "usuario");
       $("audioRemotoUsuario").srcObject = remoto;
       $("statusUsuario").classList.remove("pulso");
       status("statusUsuario","Conectado!","Mostre com a câmera o que você precisa. O voluntário está te ouvindo.");
@@ -135,6 +270,8 @@ function encerrarUsuario(remoto, caiu=false){
 
 function limparUsuario(){
   clearTimeout(timerEspera);
+  clearTimeout(timerRecuperacao);
+  recuperando = false; rechamada = false;
   const c = chamadaU; chamadaU = null;
   if(c) try{ c.close(); }catch(e){}
   try{ peerU && peerU.destroy(); }catch(e){}
@@ -180,20 +317,43 @@ function ocuparSlot(i){
   p.on("open", ()=>{
     clearTimeout(timerPlantao);
     peerV = p; meuSlot = i+1;
+    if(ocupado && chamadaV){
+      // reconectou no meio de uma chamada
+      if(recuperando && chamadaV.peerConnection){
+        const pc = chamadaV.peerConnection;
+        const vivo = pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed" || pc.connectionState === "connected");
+        if(vivo){
+          clearTimeout(timerRecuperacao);
+          recuperando = false;
+          status("statusVoluntario", "Conectado de novo.");
+        }
+      }
+      return;
+    }
     status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
     $("btnSairPlantao").classList.remove("oculto");
-    p.on("call", receberChamada);
   });
+  p.on("disconnected", ()=>{
+    if(p.disconnected && !p.destroyed){
+      try{ p.reconnect(); }catch(e){} // sinalização caiu na troca de rede
+    }
+  });
+  p.on("call", receberChamada);
   p.on("error", err=>{
     if(err && err.type === "unavailable-id"){
       try{ p.destroy(); }catch(e){}
       vigiarPlantao(); // posto ocupado, tenta o próximo
       ocuparSlot(i+1);
+    }else if(err && err.type === "network" && ocupado && chamadaV){
+      // Sinalização caiu no meio da chamada: anuncia e tenta recuperar.
+      clearTimeout(timerPlantao);
+      status("statusVoluntario", Nucleo.mensagemEstadoConexao("disconnected").texto, Nucleo.mensagemEstadoConexao("disconnected").fala);
+      tentarRecuperar(chamadaV, "voluntario");
     }else if(ocupado && chamadaV){
       clearTimeout(timerPlantao);
       caiuVol = true;
-      fimChamadaVol("A conexão caiu.", false);
       try{ p.destroy(); }catch(e){}
+      encerrarChamadaVolCaiu();
     }else{
       clearTimeout(timerPlantao);
       status("statusVoluntario","Erro ao entrar de plantão.","Verifique sua internet.");
@@ -208,6 +368,7 @@ function receberChamada(chamada){
   caiuVol = false;
   chamadaV = chamada;
   chamada.answer(streamV);
+  vigiarConexao(chamada, "voluntario");
   status("statusVoluntario","Chamada recebida!","Descreva o que a pessoa está mostrando.");
   vibrar([120,60,120]);
   chamada.on("stream", remoto=>{
@@ -218,8 +379,16 @@ function receberChamada(chamada){
     $("btnEncerrarVoluntario").classList.remove("oculto");
     $("btnSairPlantao").classList.add("oculto");
   });
-  chamada.on("close", ()=> fimChamadaVol(caiuVol ? "A conexão caiu." : "A pessoa encerrou."));
-  chamada.on("error", ()=> fimChamadaVol(caiuVol ? "A conexão caiu." : "A chamada caiu."));
+  chamada.on("close", ()=>{
+    clearTimeout(timerRecuperacao);
+    recuperando = false;
+    fimChamadaVol(caiuVol ? "A conexão caiu." : "A pessoa encerrou.");
+  });
+  chamada.on("error", ()=>{
+    clearTimeout(timerRecuperacao);
+    recuperando = false;
+    fimChamadaVol(caiuVol ? "A conexão caiu." : "A chamada caiu.");
+  });
 }
 
 $("btnMutar").addEventListener("click", ()=>{
@@ -238,7 +407,7 @@ $("btnEncerrarVoluntario").addEventListener("click", ()=>{
   fimChamadaVol("Chamada encerrada.");
 });
 
-function fimChamadaVol(msg, continua=true){
+function limparChamadaVolUI(){
   clearTimeout(timerReanuncio);
   ocupado = false; chamadaV=null;
   const v = $("videoRemoto"); v.classList.add("oculto"); v.srcObject=null;
@@ -246,6 +415,10 @@ function fimChamadaVol(msg, continua=true){
   $("btnMutar").classList.add("oculto");
   $("btnEncerrarVoluntario").classList.add("oculto");
   $("btnSairPlantao").classList.remove("oculto");
+}
+
+function fimChamadaVol(msg, continua=true){
+  limparChamadaVolUI();
   status("statusVoluntario", msg, continua ? "Você continua de plantão." : "Toque em Sair do plantão e entre de novo.");
   timerReanuncio = setTimeout(()=>{
     if(continua && peerV && !peerV.destroyed)
@@ -253,9 +426,30 @@ function fimChamadaVol(msg, continua=true){
   }, 1800);
 }
 
+// Fallback honesto do voluntário: se não recuperar, encerra limpo e re-ocupa
+// o plantão (criando um peer novo se o anterior morreu na troca de rede).
+function encerrarChamadaVolCaiu(){
+  clearTimeout(timerRecuperacao);
+  recuperando = false;
+  const peerMorto = peerV && peerV.destroyed;
+  try{ chamadaV && chamadaV.close(); }catch(e){}
+  limparChamadaVolUI();
+  status("statusVoluntario","A chamada caiu, reconectando ao plantão.","Aguarde um instante.");
+  if(peerMorto){
+    setTimeout(()=> ocuparSlot(0), 400);
+  }else{
+    timerReanuncio = setTimeout(()=>{
+      if(peerV && !peerV.destroyed)
+        status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
+    }, 1800);
+  }
+}
+
 $("btnSairPlantao").addEventListener("click", ()=>{
   clearTimeout(timerPlantao);
   clearTimeout(timerReanuncio);
+  clearTimeout(timerRecuperacao);
+  recuperando = false;
   try{ chamadaV && chamadaV.close(); }catch(e){}
   try{ peerV && peerV.destroy(); }catch(e){}
   if(streamV) streamV.getTracks().forEach(t=>t.stop());
@@ -269,5 +463,7 @@ $("btnSairPlantao").addEventListener("click", ()=>{
 ============================================================ */
 window.__VEJO_DEBUG__ = {
   get usuario(){ return { peer: peerU, chamada: chamadaU, stream: streamU, caiu: caiu }; },
-  get voluntario(){ return { peer: peerV, chamada: chamadaV, stream: streamV, ocupado: ocupado }; }
+  get voluntario(){ return { peer: peerV, chamada: chamadaV, stream: streamV, ocupado: ocupado }; },
+  get recuperando(){ return recuperando; },
+  TEMPO_RECUPERACAO
 };
