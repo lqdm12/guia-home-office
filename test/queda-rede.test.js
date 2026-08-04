@@ -156,21 +156,20 @@ test("queda de sinalização no meio da chamada: fala 'reconectando', reconecta 
         (window.__fala || []).some(f => f.includes("Conectado de novo")), null, { timeout: 15000 });
       await pV.waitForFunction(() =>
         (window.__fala || []).some(f => f.includes("Conectado de novo")), null, { timeout: 15000 });
+      const depois = { U: await probe(pU), V: await probe(pV) };
+      for (const lado of ["U", "V"]) {
+        assert.ok(!depois[lado].peerDisconnected, `${lado}: peer deve reconectar`);
+        assert.ok(!depois[lado].peerDestroyed, `${lado}: peer não deve ser destruído`);
+        assert.equal(depois[lado].pcIce, "connected", `${lado}: mídia deve continuar conectada`);
+        assert.ok(!depois[lado].fala.some(f => f.includes("A conexão caiu")),
+          `${lado}: não deve anunciar queda irrecuperável`);
+        assert.ok(depois[lado].fala.some(f => f.includes("reconectando")),
+          `${lado}: deve ter falado 'reconectando' (nunca silêncio)`);
+        assert.ok(depois[lado].fala.some(f => f.includes("Conectado de novo")),
+          `${lado}: deve anunciar a recuperação`);
+      }
     } finally {
       await sig2.close();
-    }
-
-    const depois = { U: await probe(pU), V: await probe(pV) };
-    for (const lado of ["U", "V"]) {
-      assert.ok(!depois[lado].peerDisconnected, `${lado}: peer deve reconectar`);
-      assert.ok(!depois[lado].peerDestroyed, `${lado}: peer não deve ser destruído`);
-      assert.equal(depois[lado].pcIce, "connected", `${lado}: mídia deve continuar conectada`);
-      assert.ok(!depois[lado].fala.some(f => f.includes("A conexão caiu")),
-        `${lado}: não deve anunciar queda irrecuperável`);
-      assert.ok(depois[lado].fala.some(f => f.includes("reconectando")),
-        `${lado}: deve ter falado 'reconectando' (nunca silêncio)`);
-      assert.ok(depois[lado].fala.some(f => f.includes("Conectado de novo")),
-        `${lado}: deve anunciar a recuperação`);
     }
   } finally {
     await cena.limpar();
