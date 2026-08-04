@@ -39,7 +39,21 @@ function status(elId, txt, sub){
   $(elId).innerHTML = txt + (sub ? `<small>${sub}</small>` : "");
   falar(sub ? `${txt} ${sub}` : txt);
 }
-function criarPeer(id){ return id ? new Peer(id, {config:STUN}) : new Peer({config:STUN}); }
+// Hook de configuração (opcional): __VEJO_CONFIG__.peerServer permite apontar
+// o PeerJS para um PeerServer próprio (host/port/path), usado nos testes de
+// queda de rede. Sem ele, usa o PeerServer público padrão do PeerJS.
+const PEER_SERVER = (window.__VEJO_CONFIG__ && window.__VEJO_CONFIG__.peerServer) || null;
+function opcoesPeer(){
+  const o = { config: STUN };
+  if(PEER_SERVER){
+    o.host = PEER_SERVER.host;
+    o.port = PEER_SERVER.port;
+    o.path = PEER_SERVER.path || "/";
+    o.secure = false;
+  }
+  return o;
+}
+function criarPeer(id){ return id ? new Peer(id, opcoesPeer()) : new Peer(opcoesPeer()); }
 
 /* ============================================================
    FLUXO USUÁRIO (pessoa cega pede ajuda)
