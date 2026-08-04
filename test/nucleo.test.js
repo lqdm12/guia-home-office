@@ -41,18 +41,18 @@ test("mensagemEncerrar prioriza queda de conexão", () => {
 
 test("mensagemEstadoConexao anuncia instabilidade em disconnected", () => {
   assert.deepEqual(Nucleo.mensagemEstadoConexao("disconnected"), {
-    texto: "Conexão instável.", fala: "Conexão instável, reconectando."
+    texto: "Conexão instável, reconectando.", fala: "Conexão instável, reconectando."
   });
 });
 
-test("mensagemEstadoConexao anuncia re-call em failed", () => {
+test("mensagemEstadoConexao anuncia queda com tentativa em failed", () => {
   assert.deepEqual(Nucleo.mensagemEstadoConexao("failed"), {
-    texto: "A chamada caiu.", fala: "A chamada caiu, chamando de novo."
+    texto: "A chamada caiu, tentando reconectar.", fala: "A chamada caiu, tentando reconectar."
   });
 });
 
 test("mensagemEstadoConexao cobre connected e closed", () => {
-  assert.equal(Nucleo.mensagemEstadoConexao("connected").texto, "Conectado.");
+  assert.equal(Nucleo.mensagemEstadoConexao("connected").texto, "Conectado de novo.");
   assert.equal(Nucleo.mensagemEstadoConexao("closed").fala, "Chamada encerrada.");
 });
 

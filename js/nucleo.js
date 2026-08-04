@@ -33,12 +33,12 @@
   // Mapeia o estado da RTCPeerConnection (WebRTC) para texto e fala em PT-BR.
   // Fonte de verdade: os eventos oniceconnectionstatechange / onconnectionstatechange,
   // NÃO navigator.connection (ausente no iOS Safari).
-  // connected -> silencioso é decidido no app (evita ruído); aqui retorna o texto.
+  // connected -> "Conectado de novo." só é anunciado após uma recuperação (app decide).
   function mensagemEstadoConexao(estado){
     switch(estado){
-      case "connected":    return { texto:"Conectado.", fala:"Conectado de novo." };
-      case "disconnected": return { texto:"Conexão instável.", fala:"Conexão instável, reconectando." };
-      case "failed":       return { texto:"A chamada caiu.", fala:"A chamada caiu, chamando de novo." };
+      case "connected":    return { texto:"Conectado de novo.", fala:"Conectado de novo." };
+      case "disconnected": return { texto:"Conexão instável, reconectando.", fala:"Conexão instável, reconectando." };
+      case "failed":       return { texto:"A chamada caiu, tentando reconectar.", fala:"A chamada caiu, tentando reconectar." };
       case "closed":       return { texto:"Chamada encerrada.", fala:"Chamada encerrada." };
       default:             return null;
     }

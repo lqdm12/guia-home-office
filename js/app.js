@@ -71,6 +71,30 @@ function criarPeer(id){ return id ? new Peer(id, opcoesPeer()) : new Peer(opcoes
 ============================================================ */
 let recuperando = false;
 let timerRecuperacao = null;
+let ultimaReconexao = 0;
+let timerReconexao = null;
+
+// Reconnecta a sinalização com no máximo 1 tentativa/segundo, re-agendando
+// sozinha enquanto o PeerServer estiver fora (senão o loop morre no throttle).
+// A reconexão é ADIADA (setTimeout 0) porque o PeerJS, após o erro "network",
+// chama disconnect() na mesma pilha e fecha o socket recém-criado — reconectar
+// síncrono no handler de erro era desfeito logo em seguida.
+function reconectarSePreciso(peer){
+  if(!peer || !peer.disconnected || peer.destroyed) return;
+  const faltam = 1000 - (Date.now() - ultimaReconexao);
+  if(faltam > 0){
+    clearTimeout(timerReconexao);
+    timerReconexao = setTimeout(()=> reconectarSePreciso(peer), faltam);
+    return;
+  }
+  ultimaReconexao = Date.now();
+  clearTimeout(timerReconexao);
+  setTimeout(()=>{
+    if(peer && peer.disconnected && !peer.destroyed){
+      try{ peer.reconnect(); }catch(e){}
+    }
+  }, 0);
+}
 
 // Vigia a RTCPeerConnection de uma chamada ativa e anuncia cada estado em PT-BR.
 // perfil: "usuario" | "voluntario"
@@ -85,6 +109,7 @@ function vigiarConexao(chamada, perfil){
       if(instavel){
         instavel = false;
         clearTimeout(timerRecuperacao);
+        clearTimeout(timerReconexao);
         recuperando = false;
         falar("Conectado de novo.");
       }
@@ -93,7 +118,7 @@ function vigiarConexao(chamada, perfil){
     if(estado === "disconnected" || estado === "failed"){
       if(instavel) return; // já anunciado, deixando o timer decidir o fallback
       instavel = true;
-      status(elId, Nucleo.mensagemEstadoConexao(estado).texto, Nucleo.mensagemEstadoConexao(estado).fala);
+      status(elId, Nucleo.mensagemEstadoConexao(estado).fala);
       tentarRecuperar(chamada, perfil);
     }
   }
@@ -108,9 +133,7 @@ function tentarRecuperar(chamada, perfil){
   if(recuperando) return;
   recuperando = true;
   const peer = perfil === "usuario" ? peerU : peerV;
-  if(peer && peer.disconnected && !peer.destroyed){
-    try{ peer.reconnect(); }catch(e){} // reconecta a sinalização (PeerJS)
-  }
+  reconectarSePreciso(peer);
   const pc = chamada && chamada.peerConnection;
   if(pc && typeof pc.restartIce === "function" && pc.connectionState !== "closed"){
     try{ pc.restartIce(); }catch(e){} // best-effort; ver comentário no cabeçalho
@@ -190,6 +213,7 @@ async function iniciarUsuario(){
 function montarPeerUsuario(){
   peerU = criarPeer();
   peerU.on("open", ()=>{
+    clearTimeout(timerReconexao);
     if(recuperando && chamadaU && chamadaU.peerConnection){
       const pc = chamadaU.peerConnection;
       const vivo = pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed" || pc.connectionState === "connected");
@@ -202,16 +226,12 @@ function montarPeerUsuario(){
     }
     chamarSlots();
   });
-  peerU.on("disconnected", ()=>{
-    if(peerU && peerU.disconnected && !peerU.destroyed){
-      try{ peerU.reconnect(); }catch(e){} // sinalização caiu na troca de rede
-    }
-  });
+  peerU.on("disconnected", ()=> reconectarSePreciso(peerU));
   peerU.on("error", err=>{
     if(err && err.type === "peer-unavailable") return; // slot vazio, normal
     if(err && err.type === "network" && venceu){
       // Sinalização caiu no meio da chamada: anuncia e tenta recuperar.
-      status("statusUsuario", Nucleo.mensagemEstadoConexao("disconnected").texto, Nucleo.mensagemEstadoConexao("disconnected").fala);
+      status("statusUsuario", Nucleo.mensagemEstadoConexao("disconnected").fala);
       tentarRecuperar(chamadaU, "usuario");
       return;
     }
@@ -271,6 +291,7 @@ function encerrarUsuario(remoto, caiu=false){
 function limparUsuario(){
   clearTimeout(timerEspera);
   clearTimeout(timerRecuperacao);
+  clearTimeout(timerReconexao);
   recuperando = false; rechamada = false;
   const c = chamadaU; chamadaU = null;
   if(c) try{ c.close(); }catch(e){}
@@ -316,6 +337,7 @@ function ocuparSlot(i){
   const p = criarPeer(SLOTS[i]);
   p.on("open", ()=>{
     clearTimeout(timerPlantao);
+    clearTimeout(timerReconexao);
     peerV = p; meuSlot = i+1;
     if(ocupado && chamadaV){
       // reconectou no meio de uma chamada
@@ -333,11 +355,7 @@ function ocuparSlot(i){
     status("statusVoluntario",`Você está de plantão (posto ${meuSlot}).`,"Aguardando alguém pedir ajuda.");
     $("btnSairPlantao").classList.remove("oculto");
   });
-  p.on("disconnected", ()=>{
-    if(p.disconnected && !p.destroyed){
-      try{ p.reconnect(); }catch(e){} // sinalização caiu na troca de rede
-    }
-  });
+  p.on("disconnected", ()=> reconectarSePreciso(p));
   p.on("call", receberChamada);
   p.on("error", err=>{
     if(err && err.type === "unavailable-id"){
@@ -347,7 +365,7 @@ function ocuparSlot(i){
     }else if(err && err.type === "network" && ocupado && chamadaV){
       // Sinalização caiu no meio da chamada: anuncia e tenta recuperar.
       clearTimeout(timerPlantao);
-      status("statusVoluntario", Nucleo.mensagemEstadoConexao("disconnected").texto, Nucleo.mensagemEstadoConexao("disconnected").fala);
+      status("statusVoluntario", Nucleo.mensagemEstadoConexao("disconnected").fala);
       tentarRecuperar(chamadaV, "voluntario");
     }else if(ocupado && chamadaV){
       clearTimeout(timerPlantao);
@@ -430,6 +448,7 @@ function fimChamadaVol(msg, continua=true){
 // o plantão (criando um peer novo se o anterior morreu na troca de rede).
 function encerrarChamadaVolCaiu(){
   clearTimeout(timerRecuperacao);
+  clearTimeout(timerReconexao);
   recuperando = false;
   const peerMorto = peerV && peerV.destroyed;
   try{ chamadaV && chamadaV.close(); }catch(e){}
@@ -449,6 +468,7 @@ $("btnSairPlantao").addEventListener("click", ()=>{
   clearTimeout(timerPlantao);
   clearTimeout(timerReanuncio);
   clearTimeout(timerRecuperacao);
+  clearTimeout(timerReconexao);
   recuperando = false;
   try{ chamadaV && chamadaV.close(); }catch(e){}
   try{ peerV && peerV.destroy(); }catch(e){}
@@ -465,5 +485,6 @@ window.__VEJO_DEBUG__ = {
   get usuario(){ return { peer: peerU, chamada: chamadaU, stream: streamU, caiu: caiu }; },
   get voluntario(){ return { peer: peerV, chamada: chamadaV, stream: streamV, ocupado: ocupado }; },
   get recuperando(){ return recuperando; },
+  vigiarConexao,
   TEMPO_RECUPERACAO
 };
