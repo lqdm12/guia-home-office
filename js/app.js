@@ -486,6 +486,8 @@ $("btnSairPlantao").addEventListener("click", ()=>{
   recuperando = false;
   try{ chamadaV && chamadaV.close(); }catch(e){}
   try{ peerV && peerV.destroy(); }catch(e){}
+  try{ dataV && dataV.close(); }catch(e){}
+  dataV = null;
   if(streamV) streamV.getTracks().forEach(t=>t.stop());
   chamadaV=peerV=streamV=null; ocupado=false;
   mostrarTela("home");
