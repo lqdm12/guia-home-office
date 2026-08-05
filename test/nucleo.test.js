@@ -144,3 +144,21 @@ test("viabilidade: controle remoto em celular está fora para terceiros", () => 
   assert.equal(Nucleo.viabilidadeAcessoRemoto("controle-android").viavel, false);
   assert.equal(Nucleo.viabilidadeAcessoRemoto("plataforma-x"), null);
 });
+
+test("rótulos dos controles existem para cada chave usada no fluxo", () => {
+  ["pedir","aceitar","recusar","parar","pararRemoto"].forEach(k => {
+    const r = Nucleo.rotuloCompartilhamento(k);
+    assert.ok(r && r.texto && r.fala, `rótulo de ${k} completo`);
+  });
+  assert.equal(Nucleo.rotuloCompartilhamento("nao-existe"), null);
+});
+
+test("sem suporte de plataforma é dito com todas as letras", () => {
+  assert.match(Nucleo.SEM_SUPORTE_COMPARTILHAMENTO.fala, /não permite compartilhar a tela/);
+  assert.match(Nucleo.SEM_SUPORTE_COMPARTILHAMENTO.fala, /câmera/);
+});
+
+test("lembrete periódico mantém o compartilhamento falável", () => {
+  assert.match(Nucleo.LEMBRETE_COMPARTILHAMENTO.fala, /sendo compartilhada agora/);
+  assert.notEqual(Nucleo.LEMBRETE_COMPARTILHAMENTO.fala, Nucleo.mensagensCompartilhamento("ativo").fala);
+});
