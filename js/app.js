@@ -494,6 +494,207 @@ $("btnSairPlantao").addEventListener("click", ()=>{
 });
 
 /* ============================================================
+   ACESSO REMOTO: COMPARTILHAMENTO DE TELA (piloto desktop)
+   O atendente PEDE para ver a tela; a pessoa OUVE a pergunta em
+   PT-BR, aceita ou recusa; ativo = anúncio falado + indicador
+   contínuo; parar é um toque sempre acessível, revogável a
+   qualquer instante. Nada é gravado.
+
+   Transporte do piloto (PeerJS): a track de vídeo da câmera é
+   trocada pela da tela via replaceTrack, porque o PeerJS 1.5.4
+   não renegocia uma segunda track no meio da chamada. Em produção
+   (LiveKit) vira uma segunda track real: Track.Source.ScreenShare
+   na mesma Room, reusando o token server. O pedido/aviso viaja na
+   DataConnection (controle, não mídia); no LiveKit isso vira
+   mensagem de data na mesma sessão.
+   Fonte de verdade: máquina de estados do Nucleo (nucleo.js).
+============================================================ */
+let telaU = null, estadoTela = "parado", dataU = null, dataV = null;
+let senderVideo = null, trilhaOriginal = null, iniciandoTela = false, timerIndicador = null;
+
+function suportaCompartilharTela(){
+  return !!(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === "function");
+}
+
+function anunciarTela(elId, txt){
+  const el = $(elId);
+  el.classList.remove("oculto");
+  el.textContent = txt;
+  falar(txt);
+}
+
+function enviarTela(msg, de){
+  const d = de === "usuario" ? dataU : dataV;
+  try{ if(d && d.open) d.send(msg); }catch(e){}
+}
+
+// Mostra/esconde os controles do usuário conforme o estado (Nucleo).
+const BTNS_TELA = ["btnPedirTela","btnAceitarTela","btnRecusarTela","btnPararTela","btnPararVerTela"];
+function mostrarControlesTela(controles){
+  BTNS_TELA.forEach(id=>{ const el = $(id); if(el) el.classList.add("oculto"); });
+  $("indicadorTela").classList.add("oculto");
+  const mapa = { aceitar:"btnAceitarTela", recusar:"btnRecusarTela", parar:"btnPararTela" };
+  controles.forEach(c=>{
+    if(mapa[c]) $(mapa[c]).classList.remove("oculto");
+    if(c === "indicador") $("indicadorTela").classList.remove("oculto");
+  });
+}
+
+function resetarTelaLocal(){
+  clearInterval(timerIndicador); timerIndicador = null;
+  iniciandoTela = false;
+  if(telaU){ telaU.getTracks().forEach(t=>t.stop()); telaU = null; }
+  senderVideo = null; trilhaOriginal = null;
+  estadoTela = "parado";
+  mostrarControlesTela([]);
+}
+
+function trilhaVideoSender(){
+  if(!chamadaU || !chamadaU.peerConnection) return null;
+  return chamadaU.peerConnection.getSenders().find(s=>s.track && s.track.kind === "video") || null;
+}
+function trocarTrilhaVideo(stream){
+  const s = trilhaVideoSender();
+  if(!s) return false;
+  try{
+    s.replaceTrack(stream ? stream.getVideoTracks()[0] : trilhaOriginal);
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ---- Lado usuário: recebe pedido, consente, monitora, para ---- */
+function abrirCanalControleUsuario(){
+  if(dataU || !chamadaU) return;
+  try{
+    dataU = peerU.connect(chamadaU.peer);
+    dataU.on("data", receberMensagemTela);
+    dataU.on("error", ()=>{});
+  }catch(e){ dataU = null; }
+}
+
+function receberMensagemTela(msg){
+  if(msg === "pedir-tela") receberPedidoTela();
+  else if(msg === "parar-tela") pararCompartilhamentoTela(false);
+}
+
+function receberPedidoTela(){
+  if(estadoTela !== "parado") return;
+  if(!suportaCompartilharTela()){
+    anunciarTela("statusTela", Nucleo.SEM_SUPORTE_COMPARTILHAMENTO.fala);
+    enviarTela("tela-indisponivel", "usuario");
+    return;
+  }
+  estadoTela = "aguardando";
+  anunciarTela("statusTela", Nucleo.mensagensCompartilhamento("aguardando").fala);
+  mostrarControlesTela(Nucleo.controlesCompartilhamento("aguardando").usuario);
+}
+
+$("btnAceitarTela").addEventListener("click", aceitarCompartilhamentoTela);
+async function aceitarCompartilhamentoTela(){
+  if(estadoTela !== "aguardando") return;
+  estadoTela = "iniciando"; iniciandoTela = true;
+  anunciarTela("statusTela", Nucleo.mensagensCompartilhamento("iniciando").fala);
+  mostrarControlesTela(Nucleo.controlesCompartilhamento("iniciando").usuario);
+
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getDisplayMedia({ video:true });
+  }catch(e){
+    iniciandoTela = false;
+    estadoTela = "parado";
+    anunciarTela("statusTela", "Você cancelou a confirmação do sistema. Tela não compartilhada.");
+    enviarTela("tela-recusada", "usuario");
+    mostrarControlesTela([]);
+    return;
+  }
+  if(!iniciandoTela){ stream.getTracks().forEach(t=>t.stop()); return; } // pararam com o picker aberto
+  iniciandoTela = false;
+
+  senderVideo = trilhaVideoSender();
+  trilhaOriginal = senderVideo ? senderVideo.track : null;
+  if(!trocarTrilhaVideo(stream)){
+    stream.getTracks().forEach(t=>t.stop());
+    telaU = null; estadoTela = "parado"; senderVideo = null; trilhaOriginal = null;
+    anunciarTela("statusTela", "Não consegui trocar para a tela.");
+    enviarTela("tela-parada", "usuario");
+    mostrarControlesTela([]);
+    return;
+  }
+
+  telaU = stream;
+  estadoTela = "ativo";
+  stream.getVideoTracks()[0].addEventListener("ended", ()=> pararCompartilhamentoTela(true));
+  anunciarTela("statusTela", Nucleo.mensagensCompartilhamento("ativo").fala);
+  mostrarControlesTela(Nucleo.controlesCompartilhamento("ativo").usuario);
+  enviarTela("tela-ativa", "usuario");
+  clearInterval(timerIndicador);
+  timerIndicador = setInterval(()=>{
+    if(estadoTela === "ativo" && telaU) falar(Nucleo.LEMBRETE_COMPARTILHAMENTO.fala);
+  }, 30000);
+}
+
+$("btnRecusarTela").addEventListener("click", ()=>{
+  if(estadoTela !== "aguardando") return;
+  const origem = estadoTela;
+  estadoTela = "parado";
+  anunciarTela("statusTela", Nucleo.mensagensCompartilhamento("parado", origem).fala);
+  mostrarControlesTela([]);
+  enviarTela("tela-recusada", "usuario");
+});
+
+$("btnPararTela").addEventListener("click", ()=> pararCompartilhamentoTela(true));
+
+function pararCompartilhamentoTela(avisa){
+  clearInterval(timerIndicador); timerIndicador = null;
+  if(iniciandoTela) iniciandoTela = false;
+  const origem = estadoTela;
+  if(estadoTela === "ativo") trocarTrilhaVideo(null);
+  if(telaU){ telaU.getTracks().forEach(t=>t.stop()); telaU = null; }
+  if(estadoTela !== "parado"){
+    estadoTela = "parado";
+    anunciarTela("statusTela", Nucleo.mensagensCompartilhamento("parado", origem).fala);
+    mostrarControlesTela([]);
+    if(avisa) enviarTela("tela-parada", "usuario");
+  }else{
+    mostrarControlesTela([]);
+  }
+}
+
+/* ---- Lado voluntário: pede, acompanha, para ---- */
+function receberMensagemTelaV(msg){
+  if(msg === "tela-ativa"){
+    atualizarTelaVoluntarioUI(true);
+    anunciarTela("statusTelaVol", "A pessoa está mostrando a tela.");
+  }else if(msg === "tela-parada"){
+    atualizarTelaVoluntarioUI(false);
+    anunciarTela("statusTelaVol", "A pessoa parou de mostrar a tela.");
+  }else if(msg === "tela-recusada"){
+    atualizarTelaVoluntarioUI(false);
+    anunciarTela("statusTelaVol", "A pessoa não quis mostrar a tela.");
+  }else if(msg === "tela-indisponivel"){
+    atualizarTelaVoluntarioUI(false);
+    anunciarTela("statusTelaVol", "O aparelho da pessoa não permite compartilhar a tela.");
+  }
+}
+
+function atualizarTelaVoluntarioUI(mostrando){
+  $("btnPedirTela").classList.toggle("oculto", mostrando);
+  $("btnPararVerTela").classList.toggle("oculto", !mostrando);
+}
+
+$("btnPedirTela").addEventListener("click", ()=>{
+  enviarTela("pedir-tela", "voluntario");
+  anunciarTela("statusTelaVol", "Pedido enviado. A pessoa vai ouvir a pergunta.");
+  $("btnPedirTela").classList.add("oculto");
+});
+
+$("btnPararVerTela").addEventListener("click", ()=>{
+  enviarTela("parar-tela", "voluntario");
+  atualizarTelaVoluntarioUI(false);
+  anunciarTela("statusTelaVol", "Você pediu para parar de ver a tela.");
+});
+
+/* ============================================================
    DEPURAÇÃO (testes). Expõe o estado interno para o Playwright.
    Não usado em produção.
 ============================================================ */
@@ -501,6 +702,7 @@ window.__VEJO_DEBUG__ = {
   get usuario(){ return { peer: peerU, chamada: chamadaU, stream: streamU, caiu: caiu }; },
   get voluntario(){ return { peer: peerV, chamada: chamadaV, stream: streamV, ocupado: ocupado }; },
   get recuperando(){ return recuperando; },
+  get tela(){ return { estado: estadoTela, stream: telaU, dataU, dataV }; },
   vigiarConexao,
   TEMPO_RECUPERACAO
 };
