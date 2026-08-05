@@ -19,7 +19,7 @@
 
    Requer: npm i && npx playwright install chromium
 =========================================================== */
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const fs = require("node:fs");
@@ -30,6 +30,11 @@ const { chromium } = require("playwright");
 
 const ROOT = path.join(__dirname, "..");
 const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
+
+// O ExpressPeerServer mantém timers próprios (expiração/alive-check) que
+// seguram o event loop depois que o HTTP server fecha. Sem a saída forçada
+// o processo não termina mesmo com os testes verdes.
+after(() => { process.exit(process.exitCode || 0); });
 
 function servidorEstatico(porta) {
   const server = http.createServer((req, res) => {

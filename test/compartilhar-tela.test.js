@@ -10,7 +10,7 @@
    - nunca silêncio, nunca tela compartilhada por acidente.
    Requer: npm i && npx playwright install chromium
 ============================================================ */
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const fs = require("node:fs");
@@ -18,6 +18,11 @@ const path = require("node:path");
 const express = require("express");
 const { ExpressPeerServer } = require("peer");
 const { chromium } = require("playwright");
+
+// O ExpressPeerServer mantém timers próprios (expiração/alive-check) que
+// seguram o event loop depois que o HTTP server fecha. Sem a saída forçada
+// o processo não termina mesmo com os testes verdes.
+after(() => { process.exit(process.exitCode || 0); });
 
 const ROOT = path.join(__dirname, "..");
 const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
@@ -127,7 +132,7 @@ test("pedido, aceite e parada do compartilhamento de tela com anúncios falados"
 
     // A pessoa OUVE a pergunta e vê o botão de aceitar.
     await pU.waitForFunction(() =>
-      (window.__fala || []).some(f => f.includes("quer ver a sua tela")), null, { timeout: 10000 });
+      (window.__fala || []).some(f => f.includes("quer ver a sua tela")), null, { timeout: 20000 });
     const aguardando = await pU.evaluate(() => ({
       estado: window.__VEJO_DEBUG__.tela.estado,
       aceitarVisivel: !document.querySelector("#btnAceitarTela").classList.contains("oculto"),
@@ -139,9 +144,9 @@ test("pedido, aceite e parada do compartilhamento de tela com anúncios falados"
 
     // Aceita: anúncio central, indicador, voluntário sabe que está ativo.
     await pU.click("#btnAceitarTela");
-    await pU.waitForFunction(() => window.__VEJO_DEBUG__.tela.estado === "ativo", null, { timeout: 10000 });
+    await pU.waitForFunction(() => window.__VEJO_DEBUG__.tela.estado === "ativo", null, { timeout: 20000 });
     await pU.waitForFunction(() =>
-      (window.__fala || []).some(f => f.includes("está sendo compartilhada agora")), null, { timeout: 5000 });
+      (window.__fala || []).some(f => f.includes("está sendo compartilhada agora")), null, { timeout: 15000 });
     const ativo = await pU.evaluate(() => ({
       indicador: !document.querySelector("#indicadorTela").classList.contains("oculto"),
       pararVisivel: !document.querySelector("#btnPararTela").classList.contains("oculto"),
@@ -156,13 +161,13 @@ test("pedido, aceite e parada do compartilhamento de tela com anúncios falados"
     assert.ok(ativo.pararVisivel, "parar sempre acessível em um toque");
     assert.equal(ativo.senderId, ativo.telaId, "sender agora transmite a tela");
     await pV.waitForFunction(() =>
-      !document.querySelector("#btnPararVerTela").classList.contains("oculto"), null, { timeout: 10000 });
+      !document.querySelector("#btnPararVerTela").classList.contains("oculto"), null, { timeout: 20000 });
 
     // Parar: anúncio, indicador some e a câmera volta ao sender.
     await pU.click("#btnPararTela");
-    await pU.waitForFunction(() => window.__VEJO_DEBUG__.tela.estado === "parado", null, { timeout: 5000 });
+    await pU.waitForFunction(() => window.__VEJO_DEBUG__.tela.estado === "parado", null, { timeout: 15000 });
     await pU.waitForFunction(() =>
-      (window.__fala || []).some(f => f.includes("parou")), null, { timeout: 5000 });
+      (window.__fala || []).some(f => f.includes("parou")), null, { timeout: 15000 });
     const parado = await pU.evaluate(() => ({
       indicador: !document.querySelector("#indicadorTela").classList.contains("oculto"),
       pararVisivel: !document.querySelector("#btnPararTela").classList.contains("oculto"),
@@ -180,7 +185,7 @@ test("pedido, aceite e parada do compartilhamento de tela com anúncios falados"
 
     // Voluntário volta a poder pedir (ciclo se repete sem recriar a chamada).
     await pV.waitForFunction(() =>
-      !document.querySelector("#btnPedirTela").classList.contains("oculto"), null, { timeout: 10000 });
+      !document.querySelector("#btnPedirTela").classList.contains("oculto"), null, { timeout: 20000 });
     const estadoFinal = await pV.evaluate(() => {
       const dbg = window.__VEJO_DEBUG__;
       return { ocupado: dbg.voluntario.ocupado, tela: dbg.tela.estado };

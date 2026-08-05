@@ -525,7 +525,21 @@ function anunciarTela(elId, txt){
 
 function enviarTela(msg, de){
   const d = de === "usuario" ? dataU : dataV;
-  try{ if(d && d.open) d.send(msg); }catch(e){}
+  if(!d || d.destroyed) return false;
+  if(d.open){
+    try{ d.send(msg); return true; }catch(e){ return false; }
+  }
+  // Canal de controle ainda fechando (handshake em andamento): enfileira
+  // tentativas curtas em vez de perder o pedido no silêncio. Para na
+  // primeira que chegar (evita repetir a mesma mensagem).
+  let enviado = false;
+  for(let t = 1; t <= 10 && !enviado; t++){
+    setTimeout(()=>{
+      if(enviado || !d || d.destroyed || !d.open) return;
+      try{ d.send(msg); enviado = true; }catch(e){}
+    }, 500 * t);
+  }
+  return true;
 }
 
 // Mostra/esconde os controles do usuário conforme o estado (Nucleo).
