@@ -123,10 +123,39 @@
     return VIABILIDADE_ACESSO_REMOTO[plataforma] || null;
   }
 
+  // Rótulos únicos dos controles (fonte única para a UI, em PT-BR).
+  const ROTULOS_COMPARTILHAMENTO = Object.freeze({
+    pedir:       { texto:"Pedir para ver a tela", fala:"Pedir para ver a tela" },
+    aceitar:     { texto:"Mostrar a tela", fala:"Mostrar a tela" },
+    recusar:     { texto:"Não agora", fala:"Não agora" },
+    parar:       { texto:"Parar compartilhamento", fala:"Parar de compartilhar a tela" },
+    pararRemoto: { texto:"Parar de ver a tela", fala:"Parar de ver a tela" }
+  });
+
+  function rotuloCompartilhamento(chave){
+    return ROTULOS_COMPARTILHAMENTO[chave] || null;
+  }
+
+  // Resposta honesta quando a plataforma não expõe a tela (web mobile).
+  const SEM_SUPORTE_COMPARTILHAMENTO = Object.freeze({
+    texto:"Este navegador não permite compartilhar a tela.",
+    fala:"Este navegador não permite compartilhar a tela. Continue mostrando pela câmera."
+  });
+
+  // Re-anúncio periódico enquanto ativo: mantém o estado falável sem
+  // depender do anúncio único do início (e evita repetir exatamente a
+  // mesma frase que o dedupe de fala já anunciou).
+  const LEMBRETE_COMPARTILHAMENTO = Object.freeze({
+    texto:"Lembre-se: sua tela está sendo compartilhada.",
+    fala:"Lembre-se: sua tela está sendo compartilhada agora. Para parar, toque em parar de compartilhar."
+  });
+
   const Nucleo = {
     construirSlots, mensagemTimeOut, decisaoMudo, mensagemEncerrar, mensagemEstadoConexao,
     ESTADOS_COMPARTILHAMENTO, proximoEstadoCompartilhamento, mensagensCompartilhamento,
-    controlesCompartilhamento, VIABILIDADE_ACESSO_REMOTO, viabilidadeAcessoRemoto
+    controlesCompartilhamento, VIABILIDADE_ACESSO_REMOTO, viabilidadeAcessoRemoto,
+    ROTULOS_COMPARTILHAMENTO, rotuloCompartilhamento, SEM_SUPORTE_COMPARTILHAMENTO,
+    LEMBRETE_COMPARTILHAMENTO
   };
 
   if(typeof window !== "undefined") window.Nucleo = Nucleo;

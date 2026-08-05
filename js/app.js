@@ -261,6 +261,7 @@ function chamarSlots(){
       chamadaU = c;
       chamadas.forEach(o=>{ if(o && o!==c) try{ o.close(); }catch(e){} });
       vigiarConexao(c, "usuario");
+      abrirCanalControleUsuario();
       $("audioRemotoUsuario").srcObject = remoto;
       $("statusUsuario").classList.remove("pulso");
       status("statusUsuario","Conectado!","Mostre com a câmera o que você precisa. O voluntário está te ouvindo.");
@@ -296,8 +297,11 @@ function limparUsuario(){
   const c = chamadaU; chamadaU = null;
   if(c) try{ c.close(); }catch(e){}
   try{ peerU && peerU.destroy(); }catch(e){}
+  try{ dataU && dataU.close(); }catch(e){}
+  dataU = null;
   if(streamU) streamU.getTracks().forEach(t=>t.stop());
   peerU = streamU = null; chamadasU = []; venceu = false; caiu = false;
+  resetarTelaLocal();
 }
 
 /* ============================================================
@@ -357,6 +361,11 @@ function ocuparSlot(i){
   });
   p.on("disconnected", ()=> reconectarSePreciso(p));
   p.on("call", receberChamada);
+  p.on("connection", c=>{
+    dataV = c;
+    c.on("data", receberMensagemTelaV);
+    c.on("error", ()=>{});
+  });
   p.on("error", err=>{
     if(err && err.type === "unavailable-id"){
       try{ p.destroy(); }catch(e){}
@@ -396,6 +405,7 @@ function receberChamada(chamada){
     $("btnMutar").classList.remove("oculto");
     $("btnEncerrarVoluntario").classList.remove("oculto");
     $("btnSairPlantao").classList.add("oculto");
+    $("btnPedirTela").classList.remove("oculto");
   });
   chamada.on("close", ()=>{
     clearTimeout(timerRecuperacao);
@@ -433,6 +443,10 @@ function limparChamadaVolUI(){
   $("btnMutar").classList.add("oculto");
   $("btnEncerrarVoluntario").classList.add("oculto");
   $("btnSairPlantao").classList.remove("oculto");
+  $("btnPedirTela").classList.add("oculto");
+  $("btnPararVerTela").classList.add("oculto");
+  try{ dataV && dataV.close(); }catch(e){}
+  dataV = null;
 }
 
 function fimChamadaVol(msg, continua=true){

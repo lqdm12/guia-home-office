@@ -27,9 +27,14 @@
 <!-- USUÁRIO -->
 <section id="usuario" class="tela" aria-label="Chamada de ajuda" tabindex="-1">
   <div id="statusUsuario" class="status" aria-live="assertive">Preparando a câmera...</div>
+  <p id="statusTela" class="status oculto" aria-live="assertive"></p>
+  <p id="indicadorTela" class="indicador oculto" role="status">Sua tela está sendo compartilhada agora.</p>
   <video id="videoLocal" autoplay muted playsinline class="oculto"></video>
   <audio id="audioRemotoUsuario" autoplay></audio>
   <div class="botoes">
+    <button id="btnAceitarTela" class="btn-primario oculto" aria-label="Mostrar a tela. Toque para aceitar o compartilhamento da tela.">Mostrar a tela</button>
+    <button id="btnRecusarTela" class="btn-secundario oculto" aria-label="Não agora. Toque para recusar o compartilhamento da tela.">Não agora</button>
+    <button id="btnPararTela" class="btn-perigo oculto" aria-label="Parar de compartilhar a tela. Toque para parar agora.">Parar compartilhamento</button>
     <button id="btnEncerrarUsuario" class="btn-perigo" aria-label="Encerrar chamada">Encerrar</button>
   </div>
 </section>
@@ -37,10 +42,13 @@
 <!-- VOLUNTÁRIO -->
 <section id="voluntario" class="tela" aria-label="Painel do voluntário" tabindex="-1">
   <div id="statusVoluntario" class="status" aria-live="assertive">Conectando ao plantão...</div>
+  <p id="statusTelaVol" class="status oculto" aria-live="assertive"></p>
   <video id="videoRemoto" autoplay playsinline muted class="oculto"></video>
   <audio id="audioRemotoVol" autoplay class="oculto"></audio>
   <div class="botoes">
     <button id="btnMutar" class="btn-secundario oculto" aria-label="Mutar meu microfone" aria-pressed="false">Mutar microfone</button>
+    <button id="btnPedirTela" class="btn-secundario oculto" aria-label="Pedir para ver a tela da pessoa">Pedir para ver a tela</button>
+    <button id="btnPararVerTela" class="btn-secundario oculto" aria-label="Parar de ver a tela">Parar de ver a tela</button>
     <button id="btnEncerrarVoluntario" class="btn-perigo oculto" aria-label="Encerrar chamada">Encerrar chamada</button>
     <button id="btnSairPlantao" class="btn-secundario" aria-label="Sair do plantão e voltar ao início">Sair do plantão</button>
   </div>

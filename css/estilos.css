@@ -45,6 +45,13 @@ button{
 /* ---------- Mídia ---------- */
 video{width:100%; border-radius:16px; background:#000; margin-bottom:16px}
 
+/* ---------- Indicador de compartilhamento ativo ---------- */
+.indicador{
+  background:var(--perigo); color:#fff; text-align:center;
+  padding:14px; border-radius:16px; font-weight:800; font-size:1.1rem;
+  margin-bottom:16px;
+}
+
 /* ---------- Utilitários ---------- */
 .oculto{display:none !important}
 .pulso{animation:pulso 1.4s infinite}
